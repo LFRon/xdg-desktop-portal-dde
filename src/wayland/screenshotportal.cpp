@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2024 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
@@ -7,17 +7,20 @@
 #include "protocols/treelandcapture.h"
 #include "loggings.h"
 #include "dbushelpers.h"
+#include "request2.h"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QScreen>
 #include <QPainter>
 #include <QDir>
 #include <QRegion>
 #include <QStandardPaths>
+#include <QEventLoop>
+#include <QPointer>
 
 #include <private/qwaylandscreen_p.h>
 
-Q_LOGGING_CATEGORY(portalWayland, "dde.portal.wayland");
 struct ScreenCaptureInfo {
     QtWaylandClient::QWaylandScreen *screen {nullptr};
     QPointer<ScreenCopyFrame> capturedFrame {nullptr};
@@ -25,7 +28,7 @@ struct ScreenCaptureInfo {
     QtWayland::zwlr_screencopy_frame_v1::flags flags;
 };
 
-static void destroyScreenCaptureInfo(std::list<std::shared_ptr<ScreenCaptureInfo>> captureList)
+static void destroyScreenCaptureInfo(const std::list<std::shared_ptr<ScreenCaptureInfo>> &captureList)
 {
     for (const auto &info : std::as_const(captureList)) {
         if (info->shmBuffer) {
@@ -68,6 +71,15 @@ QString ScreenshotPortalWayland::fullScreenShot()
     QEventLoop eventLoop;
     QRegion outputRegion;
     QImage::Format formatLast;
+
+    if (m_currentScreenshotRequest) {
+        connect(m_currentScreenshotRequest, &Request2::closeRequested, &eventLoop, [this, &eventLoop, &formatLast] {
+            m_currentScreenshotCancelled = true;
+            formatLast = QImage::Format_ARGB32_Premultiplied;
+            eventLoop.quit();
+        });
+    }
+
     // Capture each output
     for (auto screen : waylandDisplay()->screens()) {
         auto info = std::make_shared<ScreenCaptureInfo>();
@@ -118,6 +130,10 @@ QString ScreenshotPortalWayland::fullScreenShot()
         });
     }
     eventLoop.exec();
+    if (m_currentScreenshotCancelled) {
+        destroyScreenCaptureInfo(captureList);
+        return "";
+    }
     // Cat them according to layout
     QImage image(outputRegion.boundingRect().size(), formatLast);
     QPainter p(&image);
@@ -130,7 +146,7 @@ QString ScreenshotPortalWayland::fullScreenShot()
             sourceRect.moveTo(sourceRect.topLeft() - info->screen->geometry().topLeft());
             p.drawImage(targetRect, *info->shmBuffer->image(), sourceRect);
         } else {
-            qCWarning(portalWayland) << "image is null!!!";
+            qCWarning(SCREESHOT) << "image is null!!!";
         }
     }
     static const char *SaveFormat = "PNG";
@@ -151,6 +167,7 @@ QString ScreenshotPortalWayland::captureInteractively()
 {
     auto captureManager = context()->treelandCaptureManager();
     auto captureContext = captureManager->getContext();
+    bool sourceFailed = false;
     if (!captureContext) {
         return "";
     }
@@ -162,7 +179,21 @@ QString ScreenshotPortalWayland::captureInteractively()
                                  ,nullptr);
     QEventLoop loop;
     connect(captureContext, &TreeLandCaptureContext::sourceReady, &loop, &QEventLoop::quit);
+    connect(captureContext, &TreeLandCaptureContext::sourceFailed, &loop, [&] {
+        sourceFailed = true;
+        loop.quit();
+    });
+    if (m_currentScreenshotRequest) {
+        connect(m_currentScreenshotRequest, &Request2::closeRequested, &loop, [this, &loop] {
+            m_currentScreenshotCancelled = true;
+            loop.quit();
+        });
+    }
     loop.exec();
+    if (m_currentScreenshotCancelled || sourceFailed) {
+        captureManager->releaseCaptureContext(captureContext);
+        return "";
+    }
     auto frame = captureContext->frame();
     QImage result;
     connect(frame, &TreeLandCaptureFrame::ready, this, [this, &result, &loop](QImage image) {
@@ -170,8 +201,15 @@ QString ScreenshotPortalWayland::captureInteractively()
         loop.quit();
     });
     connect(frame, &TreeLandCaptureFrame::failed, &loop, &QEventLoop::quit);
+    if (m_currentScreenshotRequest) {
+        connect(m_currentScreenshotRequest, &Request2::closeRequested, &loop, [this, &loop] {
+            m_currentScreenshotCancelled = true;
+            loop.quit();
+        });
+    }
     loop.exec();
-    if (result.isNull()) return "";
+    captureManager->releaseCaptureContext(captureContext);
+    if (m_currentScreenshotCancelled || result.isNull()) return "";
     auto saveBasePath = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
     QDir saveBaseDir(saveBasePath);
     if (!saveBaseDir.exists()) return "";
@@ -189,6 +227,18 @@ uint ScreenshotPortalWayland::Screenshot(const QDBusObjectPath &handle,
                                   const QVariantMap &options,
                                   QVariantMap &results)
 {
+    uint response = PortalResponse::Success;
+    QPointer<Request2> request;
+
+    if (m_screenshotInProgress) {
+        qCWarning(SCREESHOT) << "Rejecting concurrent screenshot request";
+        return PortalResponse::OtherError;
+    }
+    m_screenshotInProgress = true;
+    m_currentScreenshotCancelled = false;
+
+    request = new Request2(handle, this, QStringLiteral("Screenshot"));
+    m_currentScreenshotRequest = request;
     if (options["modal"].toBool()) {
         // TODO if modal, we should block parent_window
     }
@@ -199,8 +249,15 @@ uint ScreenshotPortalWayland::Screenshot(const QDBusObjectPath &handle,
         filePath = fullScreenShot();
     }
     if (filePath.isEmpty()) {
-        return 1;
+        response = m_currentScreenshotCancelled ? PortalResponse::Cancelled :
+                               PortalResponse::OtherError;
+    } else {
+        results.insert(QStringLiteral("uri"), QUrl::fromLocalFile(filePath).toString(QUrl::FullyEncoded));
     }
-    results.insert(QStringLiteral("uri"), QUrl::fromLocalFile(filePath).toString(QUrl::FullyEncoded));
-    return 0;
+    if (request)
+        delete request.data();
+    m_currentScreenshotRequest.clear();
+    m_currentScreenshotCancelled = false;
+    m_screenshotInProgress = false;
+    return response;
 }
