@@ -60,10 +60,11 @@ void TreeLandCaptureContext::releaseCaptureFrame() {
 void TreeLandCaptureFrame::treeland_capture_frame_v1_buffer(uint32_t format, uint32_t width, uint32_t height, uint32_t stride)
 {
     if (stride != width * 4) {
-        qCDebug(PORTAL_COMMON)
+        qCWarning(PORTAL_COMMON)
                 << "Receive a buffer format which is not compatible with QWaylandShmBuffer."
                 << "format:" << format << "width:" << width << "height:" << height
                 << "stride:" << stride;
+        Q_EMIT failed();
         return;
     }
     if (m_pendingShmBuffer)
@@ -79,6 +80,13 @@ void TreeLandCaptureFrame::treeland_capture_frame_v1_flags(uint32_t flags)
 
 void TreeLandCaptureFrame::treeland_capture_frame_v1_ready()
 {
+    if (!m_pendingShmBuffer || !m_pendingShmBuffer->image() || m_pendingShmBuffer->image()->isNull()) {
+        qCWarning(PORTAL_COMMON) << "Treeland capture frame is ready without a valid image";
+        delete m_pendingShmBuffer;
+        m_pendingShmBuffer = nullptr;
+        Q_EMIT failed();
+        return;
+    }
     if (m_shmBuffer)
         delete m_shmBuffer;
     m_shmBuffer = m_pendingShmBuffer;
