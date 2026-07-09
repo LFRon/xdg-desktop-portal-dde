@@ -25,7 +25,8 @@ public:
     {
         delete m_shmBuffer;
         delete m_pendingShmBuffer;
-        destroy();
+        if (isInitialized())
+            destroy();
     }
 
     inline uint flags() const { return m_flags; }
@@ -54,7 +55,8 @@ public:
     ~TreeLandCaptureContext() override
     {
         releaseCaptureFrame();
-        destroy();
+        if (isInitialized())
+            destroy();
     }
 
     inline QRect captureRegion() const { return m_captureRegion; }

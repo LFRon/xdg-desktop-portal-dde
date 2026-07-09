@@ -5,10 +5,12 @@
 #pragma once
 
 #include "abstractwaylandportal.h"
+#include "dbushelpers.h"
 
 #include <QDBusObjectPath>
 #include <QObject>
 #include <QPointer>
+#include <QString>
 
 class Request2;
 
@@ -19,9 +21,6 @@ class ScreenshotPortalWayland : public AbstractWaylandPortal
 
 public:
     ScreenshotPortalWayland(PortalWaylandContext *context);
-
-    QString fullScreenShot();
-    QString captureInteractively();
 
 public Q_SLOTS:
     uint PickColor(const QDBusObjectPath &handle,
@@ -36,6 +35,15 @@ public Q_SLOTS:
                     QVariantMap &results);
 
 private:
+    struct CaptureResult
+    {
+        PortalResponse::Response response = PortalResponse::OtherError;
+        QString filePath;
+    };
+
+    CaptureResult fullScreenShot();
+    CaptureResult captureInteractively();
+
     QPointer<Request2> m_currentScreenshotRequest;
     bool m_currentScreenshotCancelled = false;
     bool m_screenshotInProgress = false;
