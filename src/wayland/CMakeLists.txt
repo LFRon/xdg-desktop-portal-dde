@@ -81,6 +81,8 @@ add_library(xdg-desktop-portal-dde-wayland SHARED
     toplevelpipewirestream.cpp
     protocols/wallpapermanagerclient.h
     protocols/wallpapermanagerclient.cpp
+    ../wallpaper.cpp
+    ../utils.cpp
 )
 
 qt6_generate_wayland_protocol_client_sources(xdg-desktop-portal-dde-wayland FILES
