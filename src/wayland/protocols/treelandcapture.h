@@ -23,10 +23,10 @@ public:
 
     ~TreeLandCaptureFrame() override
     {
-        delete m_shmBuffer;
-        delete m_pendingShmBuffer;
         if (isInitialized())
             destroy();
+        delete m_shmBuffer;
+        delete m_pendingShmBuffer;
     }
 
     inline uint flags() const { return m_flags; }
@@ -95,7 +95,8 @@ public:
 
     ~TreeLandCaptureManager() override
     {
-        destroy();
+        if (isInitialized())
+            destroy();
     }
 
     QPointer<TreeLandCaptureContext> getContext();
