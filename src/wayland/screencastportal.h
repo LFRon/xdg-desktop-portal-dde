@@ -11,6 +11,7 @@
 #include "toplevelmodel.h"
 
 #include <QObject>
+#include <QDBusMessage>
 #include <QDBusObjectPath>
 #include <QSystemTrayIcon>
 #include <QMenu>
@@ -33,7 +34,7 @@ public:
     ScreencastPortalWayland(PortalWaylandContext *context);
     ~ScreencastPortalWayland() override;
 
-    uint version() const { return 1;}
+    uint version() const { return 4; }
     uint AvailableSourceTypes() const;
     uint AvailableCursorModes() const;
 
@@ -59,11 +60,14 @@ public Q_SLOTS:
                uint &replyResponse,
                QVariantMap &replyResults);
 private:
-    static std::pair<PortalResponse::Response, QVariantMap> continueStartAfterDialog(ScreenCastSession *session,
+    std::pair<PortalResponse::Response, QVariantMap> continueStartAfterDialog(ScreenCastSession *session,
                                                                               const QList<QPointer<QScreen>> &selectedOutputs,
                                                                               const QRect &selectedRegion,
-                                                                              const QList<ToplevelInfo *> selectedToplevel,
+                                                                              const QList<ToplevelInfoPtr> &selectedToplevels,
                                                                               bool allowRestore);
+    void activateSessionIndicator(ScreenCastSession *session);
+    void updateTrayToolTip();
+
 private:
     QSystemTrayIcon *m_tray;
     QMenu m_menu;
