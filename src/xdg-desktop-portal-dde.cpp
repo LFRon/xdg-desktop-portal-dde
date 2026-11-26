@@ -8,6 +8,7 @@
 #include "wayland/portalwaylandcontext.h"
 #include "wayland/toplevelmodel.h"
 #include "wayland/restoredata.h"
+#include "globalshortcut.h"
 
 #include <QApplication>
 #include <QDBusConnection>
@@ -58,6 +59,7 @@ int main(int argc, char *argv[])
     if (sessionBus.registerService(QStringLiteral("org.freedesktop.impl.portal.desktop.dde"))) {
         if (onWayland()) {
             PortalWaylandContext *waylandContext = new PortalWaylandContext(&a);
+            new GlobalShortcutPortal(waylandContext);
             new FileChooserPortal(waylandContext);
             new AccessPortal(waylandContext);
             if (sessionBus.registerObject(QStringLiteral("/org/freedesktop/portal/desktop"),
